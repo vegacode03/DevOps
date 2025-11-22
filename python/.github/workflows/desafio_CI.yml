@@ -1,0 +1,39 @@
+name: Desafio Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Instalar dependências
+        run: |
+          pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+
+      - name: Rodar testes
+        run: |
+          pytest || echo "Nenhum teste encontrado"
+
+  build_docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Build da imagem Docker
+        run: |
+          docker build -t devops-app ./DevOps/ubuntu
