@@ -8,8 +8,8 @@ permissions:
   contents: read
 
 env:
-  IMAGE_BASE_NAME: meu-projeto          # nome base local; pode mudar
-  DOCKERFILE_PATH: ./python             # <--- ajusta aqui se sua pasta for outro nome
+  IMAGE_BASE_NAME: desafio-devops         # nome base local; pode mudar
+  DOCKERFILE_PATH: ./python             
 
 jobs:
   build:
@@ -73,10 +73,10 @@ jobs:
       - name: List images (debug)
         run: docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
-      - name: Run tests inside container
+      - name: Run unittest inside container
         run: |
-          # Ajuste o comando abaixo se o seu teste for diferente
-          docker run --rm ${IMAGE_NAME} /bin/sh -c "pytest -q || exit 1"
+          docker run --rm ${IMAGE_NAME} python -m unittest discover -v
+
 
   push:
     needs: test
