@@ -8,34 +8,100 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/meu-projeto:${{ github.run_number }}
+  IMAGE_BASE_NAME: meu-projeto          # nome base local; pode mudar
+  DOCKERFILE_PATH: ./python             # <--- ajusta aqui se sua pasta for outro nome
 
 jobs:
-  build-test-push:
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      image: ${{ steps.set-image.outputs.image }}
     steps:
-      - name: Checkout Repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+      - name: Show folder (debug)
+        run: |
+          echo "PWD: $(pwd)"
+          echo "List root:"
+          ls -la
+          echo "List ${DOCKERFILE_PATH}:"
+          ls -la "${{ env.DOCKERFILE_PATH }}" || true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image (local)
+        run: |
+          TAG=${{ env.IMAGE_BASE_NAME }}:${{ github.run_number }}
+          echo "Building image: $TAG (Dockerfile path = $DOCKERFILE_PATH)"
+          docker build -t "$TAG" -f "${{ env.DOCKERFILE_PATH }}/Dockerfile" "${{ env.DOCKERFILE_PATH }}"
 
-      - name: Build Docker image (and load)
-        uses: docker/build-push-action@v5
+      - name: Save image to tar
+        run: |
+          TAG=${{ env.IMAGE_BASE_NAME }}:${{ github.run_number }}
+          docker save -o image.tar "$TAG"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          file: ./Dockerfile
-          load: true
-          push: false
-          tags: ${{ env.IMAGE_NAME }}
+          name: built-image
+          path: image.tar
+
+      - name: Set output image
+        id: set-image
+        run: |
+          echo "image=${{ env.IMAGE_BASE_NAME }}:${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: ${{ needs.build.outputs.image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download built image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: built-image
+          path: .
+
+      - name: Load Docker image
+        run: |
+          echo "Loading image ${IMAGE_NAME} from tar"
+          docker load -i image.tar
+
+      - name: List images (debug)
+        run: docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
       - name: Run tests inside container
         run: |
-          docker run --rm ${{ env.IMAGE_NAME }} /bin/sh -c "pytest -q || exit 1"
+          # Ajuste o comando abaixo se o seu teste for diferente
+          docker run --rm ${IMAGE_NAME} /bin/sh -c "pytest -q || exit 1"
+
+  push:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: ${{ needs.build.outputs.image }}
+      DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/desafio-devops
+      DOCKERHUB_TAG: ${{ github.run_number }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download built image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: built-image
+          path: .
+
+      - name: Load Docker image
+        run: docker load -i image.tar
+
+      - name: Tag image for Docker Hub
+        run: |
+          docker tag ${IMAGE_NAME} ${DOCKERHUB_REPO}:${DOCKERHUB_TAG}
+          docker tag ${IMAGE_NAME} ${DOCKERHUB_REPO}:latest
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -44,10 +110,6 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Push image to Docker Hub
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ env.IMAGE_NAME }}
-
+        run: |
+          docker push ${DOCKERHUB_REPO}:${DOCKERHUB_TAG}
+          docker push ${DOCKERHUB_REPO}:latest
